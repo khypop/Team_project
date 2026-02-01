@@ -21,11 +21,22 @@ class WebRTCHost:
         
     def build_pipeline(self):
         # 윈도우 화면 캡처 -> H.264 압축 -> 전송
-        # NVIDIA 그래픽카드 사용 시: x264enc -> nvh264enc 로 바꾸면 더 빠름
+        #pipeline_str = '''
+        #    webrtcbin name=sendrecv bundle-policy=max-bundle
+        #    dxgiscreencapsrc ! videoconvert ! video/x-raw,format=I420 ! 
+        #    x264enc tune=zerolatency bitrate=4000 speed-preset=ultrafast key-int-max=30 ! 
+        #    rtph264pay config-interval=-1 ! 
+        #    application/x-rtp,media=video,encoding-name=H264,payload=96 ! 
+        #    sendrecv.
+        #'''
+
         pipeline_str = '''
             webrtcbin name=sendrecv bundle-policy=max-bundle
-            dxgiscreencapsrc ! videoconvert ! video/x-raw,format=I420 ! 
-            x264enc tune=zerolatency bitrate=4000 speed-preset=ultrafast key-int-max=30 ! 
+            d3d11screencapturesrc show-cursor=true ! 
+            d3d11convert ! 
+            d3d11download ! 
+            videoconvert ! video/x-raw,format=NV12 ! 
+            nvh264enc preset=low-latency-hq zerolatency=true bitrate=3000 rc-mode=cbr ! 
             rtph264pay config-interval=-1 ! 
             application/x-rtp,media=video,encoding-name=H264,payload=96 ! 
             sendrecv.

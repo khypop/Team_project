@@ -1,5 +1,6 @@
 import torch.nn as nn
 
+#nn.Module을 상속받아 FSRCNN 모델 정의
 class FSRCNN(nn.Module):
     def __init__(self, scale_factor, num_channels=1, d=56, s=12, m=4):
         super(FSRCNN, self).__init__()

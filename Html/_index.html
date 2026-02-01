@@ -1,55 +1,119 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
-    <meta charset="UTF-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Cloud Gaming Server</title>
+    <meta charset="UTF-8">
+    <title>FSRCNN Web Upscaler</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <style>
-        body { background-color: #111; color: white; text-align: center; }
-        video { width: 90%; max-width: 1280px; border: 2px solid #444; }
-        button { padding: 10px 20px; font-size: 1.2em; cursor: pointer; }
+        body { font-family: sans-serif; text-align: center; background: #222; color: white; }
+        canvas, video { border: 1px solid #555; max-width: 45%; vertical-align: top; }
+        .container { display: flex; justify-content: center; gap: 20px; margin-top: 20px; }
+        h3 { margin: 5px 0; color: #aaa; }
     </style>
 </head>
 <body>
-    <h2>Remote Desktop Streaming</h2>
-    <video id="video" autoplay playsinline></video>
-    <br/><br/>
-    <button id="start" onclick="start()">Start Streaming</button>
+
+    <h1>FSRCNN 실시간 업스케일링 (ONNX)</h1>
+    <p>아래 버튼을 눌러 비디오 파일(.mp4)을 선택하세요.</p>
+    <input type="file" id="uploadInput" accept="video/*">
+    
+    <div class="container">
+        <div>
+            <h3>원본 (Input)</h3>
+            <video id="inputVideo" loop muted playsinline controls width="320"></video>
+        </div>
+        <div>
+            <h3>AI 결과물 (2x Output)</h3>
+            <canvas id="outputCanvas"></canvas>
+        </div>
+    </div>
 
     <script>
-        const pc = new RTCPeerConnection();
+        let session;
+        const video = document.getElementById('inputVideo');
+        const canvas = document.getElementById('outputCanvas');
+        const ctx = canvas.getContext('2d');
 
-        // 서버에서 비디오 트랙이 오면 화면에 표시
-        pc.ontrack = function (evt) {
-            if (evt.track.kind === 'video') {
-                document.getElementById('video').srcObject = evt.streams[0];
+        // 1. ONNX 모델 로드
+        async function loadModel() {
+            try {
+                console.log("⏳ 모델 로딩 중...");
+                // webgl: 그래픽카드 사용 (속도 빠름), wasm: CPU 사용 (호환성 좋음)
+                session = await ort.InferenceSession.create('./fsrcnn.onnx', { executionProviders: ['webgl', 'wasm'] });
+                console.log("✅ 모델 로드 완료!");
+                alert("모델 준비 완료! 비디오를 선택하세요.");
+            } catch (e) {
+                console.error("모델 로드 실패:", e);
+                alert("모델 로드 실패! 콘솔(F12)을 확인하세요.");
             }
+        }
+
+        loadModel();
+
+        // 2. 비디오 파일 선택 시 재생
+        document.getElementById('uploadInput').onchange = function(event) {
+            const file = event.target.files[0];
+            const url = URL.createObjectURL(file);
+            video.src = url;
+            video.play();
         };
 
-        async function start() {
-            document.getElementById('start').style.display = 'none';
+        // 3. 매 프레임마다 AI 추론 실행
+        video.addEventListener('play', () => {
+            const processFrame = async () => {
+                if (video.paused || video.ended) return;
 
-            // 1. 비디오 수신 전용 트랜시버 추가
-            pc.addTransceiver('video', {direction: 'recvonly'});
+                // (1) 전처리: 비디오 프레임을 텐서 데이터로 변환
+                // 임시 캔버스에 그려서 픽셀 데이터 뽑기
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = video.videoWidth;
+                tempCanvas.height = video.videoHeight;
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCtx.drawImage(video, 0, 0);
+                
+                const imgData = tempCtx.getImageData(0, 0, video.videoWidth, video.videoHeight);
+                const float32Data = new Float32Array(imgData.data.length / 4 * 3); // Alpha 채널 제거 (RGB만)
 
-            // 2. Offer 생성 (나 연결하고 싶어!)
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
+                // 정규화 (0~255 -> 0.0~1.0) 및 평탄화
+                let j = 0;
+                for (let i = 0; i < imgData.data.length; i += 4) {
+                    float32Data[j++] = imgData.data[i] / 255.0;     // R
+                    float32Data[j++] = imgData.data[i + 1] / 255.0; // G
+                    float32Data[j++] = imgData.data[i + 2] / 255.0; // B
+                }
 
-            // 3. 서버에 Offer 전송 및 Answer 수신
-            const response = await fetch('/offer', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    sdp: pc.localDescription.sdp,
-                    type: pc.localDescription.type
-                })
-            });
+                // 입력 텐서 생성 [1, Height, Width, 3]
+                const inputTensor = new ort.Tensor('float32', float32Data, [1, video.videoHeight, video.videoWidth, 3]);
 
-            // 4. 서버의 응답(Answer) 적용 -> 연결 수립
-            const answer = await response.json();
-            await pc.setRemoteDescription(answer);
-        }
+                // (2) 추론 실행
+                const feeds = { input_image: inputTensor }; // Python 코드에서 정한 이름 'input_image'
+                const results = await session.run(feeds);
+                const outputTensor = results.output_image;  // Python 코드에서 정한 이름 'output_image'
+
+                // (3) 후처리: 결과를 캔버스에 그리기
+                const outH = outputTensor.dims[1];
+                const outW = outputTensor.dims[2];
+                if (canvas.width !== outW) { canvas.width = outW; canvas.height = outH; }
+
+                const outData = outputTensor.data;
+                const outImgData = ctx.createImageData(outW, outH);
+
+                j = 0;
+                for (let i = 0; i < outData.length; i += 3) {
+                    // 값 범위 복구 (0.0~1.0 -> 0~255) 및 클램핑
+                    outImgData.data[j++] = Math.min(255, Math.max(0, outData[i] * 255));     // R
+                    outImgData.data[j++] = Math.min(255, Math.max(0, outData[i + 1] * 255)); // G
+                    outImgData.data[j++] = Math.min(255, Math.max(0, outData[i + 2] * 255)); // B
+                    outImgData.data[j++] = 255; // Alpha (완전 불투명)
+                }
+
+                ctx.putImageData(outImgData, 0, 0);
+
+                // 다음 프레임 요청
+                requestAnimationFrame(processFrame);
+            };
+            processFrame();
+        });
     </script>
 </body>
 </html>

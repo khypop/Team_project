@@ -2,115 +2,123 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>WebRTC Remote Control</title>
-    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    <title>FSRCNN Web Upscaler</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <style>
-        body { margin: 0; background-color: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
-        video { max-width: 100%; max-height: 100%; cursor: none; } /* 커서 숨김 */
-        #status { position: absolute; top: 10px; left: 10px; color: lime; font-family: monospace; z-index: 100; background: rgba(0,0,0,0.5); padding: 5px; }
+        body { font-family: sans-serif; text-align: center; background: #222; color: white; }
+        .container { display: flex; justify-content: center; gap: 20px; margin-top: 20px; }
+        video, canvas { border: 1px solid #555; max-width: 45%; background: black; }
+        h3 { color: #aaa; margin-bottom: 5px; }
     </style>
 </head>
 <body>
-    <div id="status">연결 대기 중...</div>
-    <video id="remoteVideo" autoplay playsinline></video>
+
+    <h1>FSRCNN 실시간 업스케일링 (ONNX)</h1>
+    <p>아래 버튼을 눌러 비디오 파일(.mp4)을 선택하세요.</p>
+    <input type="file" id="uploadInput" accept="video/*">
+    
+    <div class="container">
+        <div>
+            <h3>원본 (Input)</h3>
+            <video id="inputVideo" loop muted playsinline controls width="320"></video>
+        </div>
+        <div>
+            <h3>AI 결과물 (2x Output)</h3>
+            <canvas id="outputCanvas"></canvas>
+        </div>
+    </div>
 
     <script>
-        const socket = io();
-        const video = document.getElementById('remoteVideo');
-        const statusDiv = document.getElementById('status');
-        
-        let pc;
-        let dataChannel;
-        
-        // STUN 서버 설정 (구글 무료 서버)
-        const config = {
-            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        let session;
+        const video = document.getElementById('inputVideo');
+        const canvas = document.getElementById('outputCanvas');
+        const ctx = canvas.getContext('2d');
+
+        async function loadModel() {
+            try {
+                console.log("⏳ 모델 로딩 중...");
+                // WebGL이 안 되면 자동으로 WASM(CPU)으로 넘어갑니다.
+                session = await ort.InferenceSession.create('./fsrcnn.onnx', { 
+                    executionProviders: ['webgl', 'wasm'] 
+                });
+                console.log("✅ 모델 로드 완료!");
+                alert("모델 준비 완료! 비디오를 선택하세요.");
+            } catch (e) {
+                console.error("모델 로드 실패:", e);
+                alert("모델 로드 실패! 콘솔을 확인하세요.");
+            }
+        }
+
+        loadModel();
+
+        document.getElementById('uploadInput').onchange = function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const url = URL.createObjectURL(file);
+                video.src = url;
+                video.play();
+            }
         };
 
-        // 1. 소켓 연결
-        socket.on('connect', () => {
-            statusDiv.innerText = "서버 접속됨. PC 기다리는 중...";
-        });
+        video.addEventListener('play', () => {
+            const processFrame = async () => {
+                if (video.paused || video.ended) return;
 
-        // 2. 메시지 수신 (Signaling)
-        socket.on('message', async (data) => {
-            if (data.type === 'offer') {
-                statusDiv.innerText = "Offer 받음! 연결 시도...";
-                await createPeerConnection();
-                await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                socket.emit('message', { sdp: pc.localDescription });
-            } 
-            else if (data.candidate && pc) {
-                await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-            }
-        });
-
-        async function createPeerConnection() {
-            if (pc) pc.close();
-            pc = new RTCPeerConnection(config);
-
-            // 영상 트랙 수신 시 화면에 뿌리기
-            pc.ontrack = (event) => {
-                video.srcObject = event.streams[0];
-                statusDiv.innerText = "🎥 영상 수신 중!";
-            };
-
-            // ICE Candidate 발견 시 서버로 전송
-            pc.onicecandidate = (event) => {
-                if (event.candidate) {
-                    socket.emit('message', { candidate: event.candidate });
+                // [수정된 부분] 중요! 비디오 크기가 0이면 아직 로딩 안 된 것이므로 대기
+                if (video.videoWidth === 0 || video.videoHeight === 0) {
+                    requestAnimationFrame(processFrame);
+                    return;
                 }
+
+                // (1) 전처리
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = video.videoWidth;
+                tempCanvas.height = video.videoHeight;
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCtx.drawImage(video, 0, 0);
+                
+                const imgData = tempCtx.getImageData(0, 0, video.videoWidth, video.videoHeight);
+                const float32Data = new Float32Array(imgData.data.length / 4 * 3); 
+
+                let j = 0;
+                for (let i = 0; i < imgData.data.length; i += 4) {
+                    float32Data[j++] = imgData.data[i] / 255.0;
+                    float32Data[j++] = imgData.data[i + 1] / 255.0;
+                    float32Data[j++] = imgData.data[i + 2] / 255.0;
+                }
+
+                const inputTensor = new ort.Tensor('float32', float32Data, [1, video.videoHeight, video.videoWidth, 3]);
+
+                // (2) 추론
+                try {
+                    const feeds = { input_image: inputTensor };
+                    const results = await session.run(feeds);
+                    const outputTensor = results.output_image;
+
+                    // (3) 후처리
+                    const outH = outputTensor.dims[1];
+                    const outW = outputTensor.dims[2];
+                    if (canvas.width !== outW) { canvas.width = outW; canvas.height = outH; }
+
+                    const outData = outputTensor.data;
+                    const outImgData = ctx.createImageData(outW, outH);
+
+                    j = 0;
+                    for (let i = 0; i < outData.length; i += 3) {
+                        outImgData.data[j++] = Math.min(255, Math.max(0, outData[i] * 255));
+                        outImgData.data[j++] = Math.min(255, Math.max(0, outData[i + 1] * 255));
+                        outImgData.data[j++] = Math.min(255, Math.max(0, outData[i + 2] * 255));
+                        outImgData.data[j++] = 255; 
+                    }
+                    ctx.putImageData(outImgData, 0, 0);
+                } catch (err) {
+                    console.error("추론 에러:", err);
+                }
+
+                requestAnimationFrame(processFrame);
             };
-
-            // 데이터 채널 (제어 신호용) 수신
-            pc.ondatachannel = (event) => {
-                dataChannel = event.channel;
-                setupInputHandlers();
-                statusDiv.innerText += " (제어 가능)";
-            };
-        }
-
-        // --- 입력 제어 (키보드/마우스) ---
-        function setupInputHandlers() {
-            // 키보드
-            window.addEventListener('keydown', (e) => sendData(`KD,${e.which}`)); // e.which는 키코드 숫자
-            window.addEventListener('keyup', (e) => sendData(`KU,${e.which}`));
-
-            // 마우스 (좌표 보정 필요)
-            video.addEventListener('mousemove', (e) => {
-                // 화면 비율에 맞춰 좌표 변환 (보이는 크기 vs 실제 영상 크기)
-                const rect = video.getBoundingClientRect();
-                const scaleX = video.videoWidth / rect.width;
-                const scaleY = video.videoHeight / rect.height;
-                const x = (e.clientX - rect.left) * scaleX;
-                const y = (e.clientY - rect.top) * scaleY;
-                sendData(`MM,${Math.round(x)},${Math.round(y)}`);
-            });
-
-            video.addEventListener('mousedown', (e) => {
-                const btn = e.button === 0 ? 'left' : e.button === 2 ? 'right' : 'middle';
-                const rect = video.getBoundingClientRect(); // 좌표 계산을 위해 필요할 수 있음
-                // 현재 Python 코드는 MC,btn,state,x,y 형식이므로 좌표도 같이 보냅니다.
-                // 좌표 계산 로직은 mousemove와 동일하게 적용 필요 (여기선 생략)
-                sendData(`MC,${btn},D,0,0`); 
-            });
-
-            video.addEventListener('mouseup', (e) => {
-                const btn = e.button === 0 ? 'left' : e.button === 2 ? 'right' : 'middle';
-                sendData(`MC,${btn},U,0,0`);
-            });
-            
-            // 우클릭 메뉴 방지
-            window.addEventListener('contextmenu', e => e.preventDefault());
-        }
-
-        function sendData(msg) {
-            if (dataChannel && dataChannel.readyState === 'open') {
-                dataChannel.send(msg);
-            }
-        }
+            processFrame();
+        });
     </script>
 </body>
 </html>

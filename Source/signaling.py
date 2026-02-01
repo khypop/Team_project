@@ -21,8 +21,8 @@ async def index(request):
         return web.Response(text="index.html 파일을 찾을 수 없습니다.", status=404)
 
 # 라우팅 설정
+app.router.add_static('/', path=BASE_DIR, name='static')
 app.router.add_get('/', index)
-app.router.add_static('/static', path=os.path.join(BASE_DIR, 'static'), name='static') if os.path.exists(os.path.join(BASE_DIR, 'static')) else None
 
 @sio.event
 async def connect(sid, environ):
