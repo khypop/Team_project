@@ -77,7 +77,11 @@ class WebRTCServer:
             if m_type == 'mousemove':
                 pyautogui.moveTo(msg['x'], msg['y'])
             elif m_type == 'mousedown':
-                pyautogui.click(x=msg['x'], y=msg['y'], button=msg.get('button', 'left'))
+                pyautogui.mouseDown(x=msg['x'], y=msg['y'], button=msg.get('button', 'left'))
+            elif m_type == 'mouseup':
+                pyautogui.mouseUp(x=msg['x'], y=msg['y'],button=msg.get('button', 'left'))
+            elif m_type == 'mousescroll':
+                pyautogui.scroll(msg['dy']*120)
             elif m_type == 'keypress':
                 key = msg.get('key')
                 # 특수키 매핑 (필요 시 추가)
@@ -109,9 +113,12 @@ class WebRTCServer:
                 'up': 'up',
                 'down': 'down',
                 'delete': 'delete',
-                'insert': 'insert'
+                'insert': 'insert',
+                'hangul': 'hangul',
+                'hanja': 'hanja'
             }
                 pyautogui.press(special_key_map.get(key, key))
+                
         except Exception as e:
             print(f"❌ 제어 실행 오류: {e}")
 
