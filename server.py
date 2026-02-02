@@ -81,8 +81,14 @@ class WebRTCServer:
             elif m_type == 'mouseup':
                 pyautogui.mouseUp(x=msg['x'], y=msg['y'],button=msg.get('button', 'left'))
             elif m_type == 'mousescroll':
-                pyautogui.scroll(msg['dy']*120)
-            elif m_type == 'keypress':
+                dy=msg.get('dy',0)
+
+                if dy > 0:
+                    pyautogui.scroll(dy * 120)
+                else:
+                    pyautogui.scroll(dy * 120)
+                    
+            elif m_type in ['keydown','keyup']:
                 key = msg.get('key')
                 # 특수키 매핑 (필요 시 추가)
                 special_key_map = {
@@ -117,8 +123,12 @@ class WebRTCServer:
                 'hangul': 'hangul',
                 'hanja': 'hanja'
             }
-                pyautogui.press(special_key_map.get(key, key))
-                
+                target_key=special_key_map.get(key, key)
+                if m_type == 'keydown':
+                    pyautogui.keyDown(target_key)
+                else:
+                    pyautogui.keyUp(target_key)
+
         except Exception as e:
             print(f"❌ 제어 실행 오류: {e}")
 

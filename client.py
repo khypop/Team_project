@@ -56,7 +56,7 @@ class WebRTCClient:
         # 마우스 이동 및 클릭
         def on_move(x, y):
             cur=time.time() 
-            if self.is_open and (cur-self.last_move_time > 0.05):
+            if self.is_open and (cur-self.last_move_time > 0.02):
                 self.send_ctrl({"type": "mousemove", "x": int(x), "y": int(y)})
                 self.last_move_time= cur
         def on_click(x, y, button, pressed):
@@ -69,8 +69,14 @@ class WebRTCClient:
             if self.is_open:
                 self.send_ctrl({"type":"mousescroll","dx":dx,"dy":dy})
 
-        # 키보드 입력
         def on_press(key):
+            send_key_event(key,"keydown")
+        
+        def on_release(key):
+            send_key_event(key,"keyup")
+
+        # 키보드 입력
+        def send_key_event(key,action):
             if self.is_open:
                 try:
                     if hasattr(key,'char') and key.char:
@@ -81,11 +87,11 @@ class WebRTCClient:
                         else: k= key.name
                     else:
                         k= key.name
-                    self.send_ctrl({"type": "keypress", "key":k})
+                    self.send_ctrl({"type": action, "key":k})
                 except: pass
 
         mouse.Listener(on_move=on_move, on_click=on_click,on_scroll=on_scroll, daemon=True).start()
-        keyboard.Listener(on_press=on_press, daemon=True).start()
+        keyboard.Listener(on_press=on_press,on_release=on_release, daemon=True).start()
 
     def send_ctrl(self, payload):
         if self.data_channel:
