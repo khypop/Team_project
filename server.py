@@ -28,7 +28,7 @@ class WebRTCServer:
 
     async def run(self):
         self.loop = asyncio.get_running_loop()
-        self.conn = await websockets.connect('ws://172.30.1.98:8888') #시그널링 서버로 연결
+        self.conn = await websockets.connect('wss://filter-somewhat-telecharger-carb.trycloudflare.com') #시그널링 서버로 연결
         #시그널링 서버에 자신을 server로 등록
         await self.conn.send(json.dumps({'type': 'register', 'id': 'server'}))
         #ice 후보 생성 및 SDP offer 생성 필요시 호출 
@@ -84,9 +84,9 @@ class WebRTCServer:
                 dy=msg.get('dy',0)
 
                 if dy > 0:
-                    pyautogui.scroll(dy * 120)
+                    pyautogui.scroll(int(dy * 160))
                 else:
-                    pyautogui.scroll(dy * 120)
+                    pyautogui.scroll(int(dy * 120))
                     
             elif m_type in ['keydown','keyup']:
                 key = msg.get('key')
