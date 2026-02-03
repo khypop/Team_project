@@ -47,7 +47,17 @@ class FSRCNN(nn.Module):
     # 가중치 초기화 함수 정의
     def _initialize_weights(self):
         for m in self.modules():
-            if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
+            # 일반 합성곱 레이어 (Conv2d)
+            if isinstance(m, nn.Conv2d):
+                # He 초기화 (PReLU에 적합)
                 nn.init.kaiming_normal_(m.weight.data, a=0, mode='fan_in', nonlinearity='relu')
+                if m.bias is not None:
+                    m.bias.data.zero_()
+            
+            # 마지막 확대 레이어 (ConvTranspose2d)
+            # ★ 여기를 수정했습니다! 
+            # 논문에 따라 아주 작은 값(0.001)으로 초기화하여 초반 노이즈 발생을 막습니다.
+            elif isinstance(m, nn.ConvTranspose2d):
+                nn.init.normal_(m.weight.data, mean=0.0, std=0.001)
                 if m.bias is not None:
                     m.bias.data.zero_()

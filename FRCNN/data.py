@@ -13,11 +13,10 @@ class SRDataset(Dataset):
             scale_factor (int): 확대 배율 (예: 2, 3, 4)
             crop_size (int): HR 이미지에서 잘라낼 패치 크기 (scale_factor의 배수여야 함)
         """
-        self.image_filenames = [os.path.join(image_dir, x) for x in os.listdir(image_dir) if x.lower().endswith(('.png', '.jpg', '.jpeg'))]
+        self.image_filenames = [os.path.join(image_dir, x) for x in os.listdir(image_dir) if x.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))]
         self.scale_factor = scale_factor
         self.crop_size = crop_size
         
-        # 기본 텐서 변환기
         self.to_tensor = transforms.ToTensor()
 
     def __getitem__(self, index):
@@ -33,7 +32,7 @@ class SRDataset(Dataset):
             top = random.randint(0, h - self.crop_size)
             hr_patch = y.crop((left, top, left + self.crop_size, top + self.crop_size))
         else:
-            hr_patch = y # 이미지가 너무 작으면 원본 그대로 (배치 처리시 에러 날 수 있으니 큰 이미지 권장)
+            hr_patch = y.resize((self.crop_size, self.crop_size), resample=Image.BICUBIC)
 
         # 3. Data Augmentation (과대적합 방지)
         # 랜덤 회전 및 대칭

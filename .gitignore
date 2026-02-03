@@ -209,3 +209,11 @@ __marimo__/
 
 #Onxx
 *.onnx
+
+*.bmp
+*.png
+*.jpg
+*.jpeg
+
+*.zip
+*.pth
