@@ -11,7 +11,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 # 사용자 설정
 # ==========================================
 IMG_PATH = os.path.join(current_dir, "test_image.png")           # 테스트할 원본 고화질 이미지
-MODEL_PATH = os.path.join(current_dir, "fsrcnn_x2_epoch200.pth") # 학습된 모델 파일 경로
+MODEL_PATH = os.path.join(current_dir, "fsrcnn_x2.pth") # 학습된 모델 파일 경로
 SCALE_FACTOR = 2                      # 학습할 때 썼던 배율 (2배)
 # ==========================================
 

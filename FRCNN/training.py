@@ -15,13 +15,13 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 # ==========================================
 BATCH_SIZE = 32
 LEARNING_RATE = 1e-4
-EPOCHS = 200
+EPOCHS = 500
 SCALE_FACTOR = 2  # 2배 확대
 TRAIN_IMG_DIR = os.path.join(current_dir, "train_images")
 
 #GPU 사용 설정
-device = torch.device("cpu")
-#device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#device = torch.device("cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 try:
@@ -75,6 +75,6 @@ if train_loader:
         print(f"Epoch [{epoch+1}/{EPOCHS}] Loss: {avg_loss:.6f} | PSNR: {avg_psnr:.2f}dB")
         
         if (epoch+1) == EPOCHS:
-            torch.save(model.state_dict(), f"fsrcnn_x{SCALE_FACTOR}_epoch{epoch+1}.pth")
+            torch.save(model.state_dict(), f"fsrcnn_x{SCALE_FACTOR}.pth")
 
     print("학습 완료!")
