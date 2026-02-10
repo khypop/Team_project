@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Remote Upscaler</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <script src="/static/upscale.js"></script>
+</head>
+<body>
+    <div id="status">상태: 대기 중...</div>
+    
+    <video id="inputVideo" style="display:none;" autoplay muted playsinline></video>
+    
+    <canvas id="outputCanvas"></canvas>
+
+    <button id="startBtn">시스템 가동 및 원격 연결</button>
+
+    <script>
+        const upscaler = new FSRCNN_Upscaler('inputVideo', 'outputCanvas', './fsrcnn_x2.onnx');
+
+        document.getElementById('startBtn').onclick = async () => {
+            document.getElementById('status').innerText = "상태: 모델 로딩 중...";
+            
+            // 1. 모델 초기화
+            await upscaler.init();
+
+            // 2. 원격 서버와 연결 (FastAPI /connect 호출)
+            const response = await fetch('/connect', { method: 'POST' });
+            const data = await response.json();
+            
+            if (data.status === 'connected') {
+                document.getElementById('status').innerText = "상태: 원격 스트림 수신 중...";
+                
+                // [중요] 여기에 원격 제어 프로그램의 스트림 객체를 넣으세요.
+                // 예: peerConnection.ontrack = (event) => upscaler.setRemoteStream(event.streams[0]);
+                // 지금은 테스트를 위해 카메라/화면공유 스트림을 예시로 연결합니다.
+                const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                
+                await upscaler.setRemoteStream(stream);
+                upscaler.start();
+                
+                document.getElementById('status').innerText = "상태: AI 실시간 보정 중";
+            }
+        };
+    </script>
+</body>
+</html>

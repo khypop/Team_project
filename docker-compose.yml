@@ -1,0 +1,14 @@
+version: '3.8'
+services:
+  ai_remote_app:
+    build: .
+    ports:
+      - "8000:8000"
+    restart: always
+
+  cf_tunnel:
+    image: cloudflare/cloudflared:latest
+    # 이론: 외부 사용자가 접속할 수 있는 안전한 보안 터널 생성
+    command: tunnel --no-autoupdate run --token YOUR_CLOUDFLARE_TOKEN
+    depends_on:
+      - ai_remote_app
