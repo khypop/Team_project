@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>원격 제어 센터</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #1a1a1a; color: white; padding-top: 100px; }
+        .btn { padding: 20px 40px; font-size: 1.5rem; background: #007bff; color: white; border: none; border-radius: 12px; cursor: pointer; }
+        .btn:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+    <h1>🖥️ 원격 시스템 리모컨</h1>
+    <button class="btn" onclick="bootPC()">컴퓨터 전원 켜기 (WoL)</button>
+    <p id="result"></p>
+
+    <script>
+        async function bootPC() {
+            const res = await fetch('/wakeup', { method: 'POST' });
+            const data = await res.json();
+            document.getElementById('result').innerText = data.message;
+        }
+    </script>
+</body>
+</html>
