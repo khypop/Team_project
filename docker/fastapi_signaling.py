@@ -1,11 +1,18 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
 import json
 import socket
 import struct
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # HTML 템플릿 설정을 위해 (index.html이 들어갈 폴더)
 templates = Jinja2Templates(directory="templates")
@@ -21,6 +28,14 @@ ROUTER_IP = "192.168.0.1"        # 본인 공유기 외부 IP 혹은 DDNS
 @app.get("/", response_class=HTMLResponse)
 async def get_index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request):
+    return templates.TemplateResponse("register.html", {"request": request})
 
 # 2. PC 깨우기 API (버튼 누르면 실행)
 @app.post("/wakeup")
@@ -39,22 +54,31 @@ async def websocket_endpoint(websocket: WebSocket):
     pid = None
     try:
         while True:
-            # 메시지 수신
             msg = await websocket.receive_text()
             data = json.loads(msg)
             
-            # 등록 로직
             if data.get("type") == "register":
                 pid = data["id"]
                 peers[pid] = websocket
-                print(f"✅ {pid} 등록 완료")
+                print(f"✅ {pid} 등록 완료 (현재 접속자: {list(peers.keys())})")
+
+                # 상대방 ID 결정
+                other_id = "client" if pid == "server" else "server"
+                
+                # 만약 상대방이 이미 접속해 있다면 양쪽에 알림
+                if other_id in peers:
+                    print(f"🔗 {pid} <-> {other_id} 매칭 시도")
+                    # 신규 접속자에게 기존에 있던 피어 알림
+                    await websocket.send_text(json.dumps({"type": "new_peer", "id": other_id}))
+                    # 기존 피어에게 신규 접속자 알림
+                    await peers[other_id].send_text(json.dumps({"type": "new_peer", "id": pid}))
             
-            # 중계 로직
             else:
                 target = data.get("target")
                 if target in peers:
-                    # 대상에게 메시지 전달
                     await peers[target].send_text(json.dumps(data))
+                else:
+                    print(f"❌ 배달 실패: 대상 '{target}' 없음")
                     
     except WebSocketDisconnect:
         if pid in peers:
