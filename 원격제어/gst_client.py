@@ -53,28 +53,33 @@ class WebRTCClient:
             self.gui.update_status(f"❌ 주소 조회 실패: {e}","red")
         return None
     
-    async def run(self): 
-        self.loop = asyncio.get_running_loop()
-        self.url= await self.get_signaling_url()
-        ssl_context=ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-        self.conn = await websockets.connect(self.url,ssl=ssl_context)
-        await self.conn.send(json.dumps({"type": "register", "id": "client"}))
-        #ice 후보 생성 시 호출 및 데이터 채널 수신  
-        self.webrtc.connect("on-ice-candidate", self.on_ice_candidate)
-        self.webrtc.connect("pad-added", self.on_pad_added)
-        self.webrtc.connect("on-data-channel", self.on_data_channel)
+    async def run(self):
+        while True:
+            try:
+                self.loop = asyncio.get_running_loop()
+                self.url= await self.get_signaling_url()
+                ssl_context=ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                self.conn = await websockets.connect(self.url,ssl=ssl_context)
+                await self.conn.send(json.dumps({"type": "register", "id": "client"}))
+                #ice 후보 생성 시 호출 및 데이터 채널 수신  
+                self.webrtc.connect("on-ice-candidate", self.on_ice_candidate)
+                self.webrtc.connect("pad-added", self.on_pad_added)
+                self.webrtc.connect("on-data-channel", self.on_data_channel)
 
-        self.pipeline.set_state(Gst.State.PLAYING)
-        self.gui.update_status("🚀 클라이언트에서 서버 연결 대기 중...","green")
+                self.pipeline.set_state(Gst.State.PLAYING)
+                self.gui.update_status("🚀 연결성공! 클라이언트에서 서버 연결 대기 중...","green")
 
-        async for message in self.conn:
-            msg = json.loads(message)
-            if msg["type"] == "offer": #SDP offer 수신 
-                await self.handle_offer(msg["sdp"])
-            elif msg["type"] == "candidate": #ice 후보 추가 
-                self.webrtc.emit("add-ice-candidate", msg["sdpMLineIndex"], msg["candidate"])
+                async for message in self.conn:
+                    msg = json.loads(message)
+                    if msg["type"] == "offer": #SDP offer 수신 
+                        await self.handle_offer(msg["sdp"])
+                    elif msg["type"] == "candidate": #ice 후보 추가 
+                        self.webrtc.emit("add-ice-candidate", msg["sdpMLineIndex"], msg["candidate"])
+            except Exception as e:
+                self.gui.update_status("연결 오류 3초후에 재시도","red")
+                await asyncio.sleep(3)
 
     def on_data_channel(self, webrtc, channel):
         self.data_channel = channel #데이터 채널 저장 
