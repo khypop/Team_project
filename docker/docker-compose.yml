@@ -33,7 +33,47 @@ services:
     ports:
       - "3306:3306"                  # 외부 DB 툴(HeidiSQL 등)로 접속할 때 필요
     volumes:
-      - ./mysql_data:/var/lib/mysql    
+      - ./mysql_data:/var/lib/mysql
+  
+  duckdns-sync:
+    image: alpine
+    container_name: duckdns-sync
+    depends_on:
+      - tunnel
+    restart: always
+
+    command: >
+      sh -c "
+      apk add --no-cache curl docker-cli;
+      echo 'Searching for Cloudflare URL...';
+      while true; do
+        # 1. 로그에서 https://가 포함된 주소를 정확히 추출
+        RAW_URL=$$(docker logs cf-tunnel 2>&1 | grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' | tail -n 1);
+        
+        if [ ! -z \"$$RAW_URL\" ]; then
+          # 2. sed 구분자를 | 로 변경하여 에러 방지 (https:// 삭제)
+          CLEAN_URL=$$(echo $$RAW_URL | sed 's|https://||');
+          
+          if [ ! -z \"$$CLEAN_URL\" ]; then
+            echo \"Found URL: $$CLEAN_URL\";
+            echo \"Updating DuckDNS...\";
+            
+            # 3. DuckDNS 업데이트 실행
+            RESULT=$$(curl -s \"https://www.duckdns.org/update?domains=remote-system&token=143558db-2881-468c-8bf9-f2ff430dce82&txt=wss://$$CLEAN_URL/ws\");
+            
+            echo \"DuckDNS Response: $$RESULT\";
+            
+            if [ \"$$RESULT\" = \"OK\" ]; then
+              echo 'Update Success! Target URL: wss://'$$CLEAN_URL'/ws';
+              break;
+            fi
+          fi
+        fi
+        sleep 5;
+      done;
+      sleep infinity"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   
 
 # 데이터를 영구 저장하기 위한 볼륨 정의
 volumes:
