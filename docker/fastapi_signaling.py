@@ -10,6 +10,10 @@ from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 import os
+from passlib.context import CryptContext
+import requests
+
+
 
 app = FastAPI()
 app.add_middleware(
@@ -81,15 +85,34 @@ async def register_page(request: Request):
 # 2. PC 깨우기 API
 @app.post("/wakeup")
 async def wakeup(request: Request):
-    # 보안: 로그인한 사용자만 깨우기 가능
+    # 1. 보안: 기존 쿠키 방식 유지
     if not request.cookies.get("session_user"):
         return {"status": "error", "message": "로그인이 필요합니다."}
 
+    # 2. 클라이언트가 보낸 모드(standard/fsrcnn) 추출
+    try:
+        data = await request.json()
+        mode = data.get("mode", "standard")
+    except:
+        mode = "standard"
+
+    # 3. 매직 패킷 생성 및 전송 (기존 로직 그대로)
     cleaned_mac = TARGET_MAC.replace(':', '').replace('-', '')
     packet = struct.pack('!B', 0xff) * 6 + struct.pack('!BBBBBB', *[int(cleaned_mac[i:i+2], 16) for i in range(0, 12, 2)]) * 16
+    
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1) # 브로드캐스트 옵션만 추가
         s.sendto(packet, (ROUTER_IP, 9))
-    return {"status": "success", "message": "부팅 신호 전송 완료!"} 
+    
+    # 4. 결과 반환 (모드 이름 포함)
+    return {"status": "success", "message": f"[{mode}] 부팅 신호 전송 완료!"}
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
 
 # -----[로그인 회원가입 데이터 처리(DB 저장)] ------
 @app.post("/register")
@@ -99,8 +122,10 @@ async def do_register(username: str = Form(...), password: str = Form(...), db: 
     if existing_user:
         return HTMLResponse(content="이미 존재하는 아이디입니다.", status_code=400)
     
+    hashed_password= get_password_hash(password)
+    new_user = User(username=username, password=hashed_password)
+    
     # DB에 새 유저 저장
-    new_user = User(username=username, password=password)
     db.add(new_user)
     db.commit()
     print(f"✅ DB 저장 완료: {username}")
@@ -110,9 +135,9 @@ async def do_register(username: str = Form(...), password: str = Form(...), db: 
 @app.post("/login")
 async def do_login(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
     # DB에서 아이디와 비번이 맞는지 확인
-    user = db.query(User).filter(User.username == username, User.password == password).first()
+    user = db.query(User).filter(User.username == username,).first()
     
-    if user:
+    if user and verify_password(password, user.password):
         print(f"✅ 로그인 성공: {username}")
         response = RedirectResponse(url="/", status_code=303)
         response.set_cookie(key="session_user", value=username)
@@ -125,6 +150,8 @@ async def logout():
     response = RedirectResponse(url="/", status_code=303)
     response.delete_cookie("session_user")
     return response
+
+
 
 #-----웹소켓------------------
 # 3. 시그널링 서버 로직 (사용자님의 기존 코드를 FastAPI식으로 변환)
