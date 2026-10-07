@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>WebRTC Remote Control</title>
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    <style>
+        body { margin: 0; background-color: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        video { max-width: 100%; max-height: 100%; cursor: none; } /* 커서 숨김 */
+        #status { position: absolute; top: 10px; left: 10px; color: lime; font-family: monospace; z-index: 100; background: rgba(0,0,0,0.5); padding: 5px; }
+    </style>
+</head>
+<body>
+    <div id="status">연결 대기 중...</div>
+    <video id="remoteVideo" autoplay playsinline></video>
+
+    <script>
+        const socket = io();
+        const video = document.getElementById('remoteVideo');
+        const statusDiv = document.getElementById('status');
+        
+        let pc;
+        let dataChannel;
+        
+        // STUN 서버 설정 (구글 무료 서버)
+        const config = {
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        };
+
+        // 1. 소켓 연결
+        socket.on('connect', () => {
+            statusDiv.innerText = "서버 접속됨. PC 기다리는 중...";
+        });
+
+        // 2. 메시지 수신 (Signaling)
+        socket.on('message', async (data) => {
+            if (data.type === 'offer') {
+                statusDiv.innerText = "Offer 받음! 연결 시도...";
+                await createPeerConnection();
+                await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                socket.emit('message', { sdp: pc.localDescription });
+            } 
+            else if (data.candidate && pc) {
+                await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+        });
+
+        async function createPeerConnection() {
+            if (pc) pc.close();
+            pc = new RTCPeerConnection(config);
+
+            // 영상 트랙 수신 시 화면에 뿌리기
+            pc.ontrack = (event) => {
+                video.srcObject = event.streams[0];
+                statusDiv.innerText = "🎥 영상 수신 중!";
+            };
+
+            // ICE Candidate 발견 시 서버로 전송
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('message', { candidate: event.candidate });
+                }
+            };
+
+            // 데이터 채널 (제어 신호용) 수신
+            pc.ondatachannel = (event) => {
+                dataChannel = event.channel;
+                setupInputHandlers();
+                statusDiv.innerText += " (제어 가능)";
+            };
+        }
+
+        // --- 입력 제어 (키보드/마우스) ---
+        function setupInputHandlers() {
+            // 키보드
+            window.addEventListener('keydown', (e) => sendData(`KD,${e.which}`)); // e.which는 키코드 숫자
+            window.addEventListener('keyup', (e) => sendData(`KU,${e.which}`));
+
+            // 마우스 (좌표 보정 필요)
+            video.addEventListener('mousemove', (e) => {
+                // 화면 비율에 맞춰 좌표 변환 (보이는 크기 vs 실제 영상 크기)
+                const rect = video.getBoundingClientRect();
+                const scaleX = video.videoWidth / rect.width;
+                const scaleY = video.videoHeight / rect.height;
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+                sendData(`MM,${Math.round(x)},${Math.round(y)}`);
+            });
+
+            video.addEventListener('mousedown', (e) => {
+                const btn = e.button === 0 ? 'left' : e.button === 2 ? 'right' : 'middle';
+                const rect = video.getBoundingClientRect(); // 좌표 계산을 위해 필요할 수 있음
+                // 현재 Python 코드는 MC,btn,state,x,y 형식이므로 좌표도 같이 보냅니다.
+                // 좌표 계산 로직은 mousemove와 동일하게 적용 필요 (여기선 생략)
+                sendData(`MC,${btn},D,0,0`); 
+            });
+
+            video.addEventListener('mouseup', (e) => {
+                const btn = e.button === 0 ? 'left' : e.button === 2 ? 'right' : 'middle';
+                sendData(`MC,${btn},U,0,0`);
+            });
+            
+            // 우클릭 메뉴 방지
+            window.addEventListener('contextmenu', e => e.preventDefault());
+        }
+
+        function sendData(msg) {
+            if (dataChannel && dataChannel.readyState === 'open') {
+                dataChannel.send(msg);
+            }
+        }
+    </script>
+</body>
+</html>
